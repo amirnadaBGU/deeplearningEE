@@ -14,13 +14,16 @@ from sklearn.metrics import confusion_matrix
 from scipy.ndimage import gaussian_filter1d
 from sklearn.model_selection import StratifiedShuffleSplit
 from collections import Counter
-
+import random
+from torchvision import transforms
 
 BATCH_SIZE = 256
 CLASSES_COUNT = 10
-LEARNING_RATE = 0.0005
-EPOCHS_COUNT = 30
-TRAIN_SPLIT_RATIO = 0.001
+LEARNING_RATE = 0.001
+EPOCHS_COUNT = 25 # changed to 25 to oveserve overfit in section 2 (I think that accroding to forum conditions need to be the same)
+TRAIN_SPLIT_RATIO = 0.8 # 0.8 - regular split. ~0.0005 for receiving an overfit
+
+DEBUG = True
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Device used for learning: {DEVICE}")
 
@@ -52,6 +55,23 @@ class MyNet(nn.Module):
         out = self.sm_1(out)
         return out
 
+class MyNet2(nn.Module):
+    def __init__(self,classes_count):
+        super(MyNet2, self).__init__()
+        self.conv1 = nn.Conv2d(1, 5, 5)
+        self.pool = nn.MaxPool2d(2, 2)
+        self.conv2 = nn.Conv2d(5, 16, 5)
+        self.fc1 = nn.Linear(16 * 4 * 4, 120)
+        self.fc2 = nn.Linear(120, 64)
+        self.fc3 = nn.Linear(64, classes_count)
+    def forward(self, x):
+        x = self.pool(nn.functional.relu(self.conv1(x)))
+        x = self.pool(nn.functional.relu(self.conv2(x)))
+        x = x.view(-1, 16 * 4 * 4)
+        x = nn.functional.relu(self.fc1(x))
+        x = nn.functional.relu(self.fc2(x))
+        x = self.fc3(x) # softmax is included in the loss function
+        return x
 
 def visualize_model_as_graph(model:MyNet):
     dummy_input = torch.randn(1, 1, 28, 28) #single MNIST image size
@@ -74,10 +94,41 @@ def load_train_set(origin_train_data, split_ratio, batch_size,force_balanced_cat
         train_set, validation_set = random_split(origin_train_data, [train_size, validation_size])
     train_loader = DataLoader(dataset=train_set, batch_size=batch_size, shuffle=True)
     validation_loader = DataLoader(dataset=validation_set, batch_size=batch_size, shuffle=False)
-    # Verify categories are balanced:
-    sets_dict = {"Train": train_set, "Validation": validation_set}
-    visualize_data_splits(sets_dict)
+
+    if DEBUG:
+        # Verify categories are balanced:
+        sets_dict = {"Train": train_set, "Validation": validation_set}
+        visualize_data_splits(sets_dict)
     return train_loader, validation_loader
+
+def add_augmentation_using_torchvision(train_set, method, percentage):
+    # Get the original transform if it exists
+    original_transform = train_set.transform if hasattr(train_set, 'transform') else None
+
+    # Define some augmentation options
+    augmentation_methods = {
+        'flip': transforms.RandomHorizontalFlip(p=1.0),
+        'rotate': transforms.RandomRotation(degrees=15),
+        'color_jitter': transforms.ColorJitter(brightness=0.5, contrast=0.5),
+        'crop': transforms.RandomResizedCrop(size=(224, 224), scale=(0.8, 1.0))
+    }
+
+    if method not in augmentation_methods:
+        raise ValueError(f"Unsupported augmentation method: {method}")
+
+    # Decide whether to apply augmentation to each image
+    def apply_with_probability(img):
+        if random.random() < percentage:
+            return augmentation_methods[method](img)
+        return img
+
+    # Compose the new transform
+    train_set.transform = transforms.Compose([
+        transforms.Lambda(apply_with_probability),
+        original_transform if original_transform else transforms.ToTensor()
+    ])
+
+    return train_set
 
 def plot_categories_histograms(set,header):
     # Extract class labels from the original dataset (Subset stores indices)
@@ -262,7 +313,8 @@ if __name__ == '__main__':
     #inspect_minist_data(train_data, test_data)
 
     # Only for debug Purposes for seif 2
-    visualize_data_splits({"Test":test_data})
+    if DEBUG:
+        visualize_data_splits({"Test":test_data})
 
     print("training...")
     train(model, train_data, TRAIN_SPLIT_RATIO, BATCH_SIZE, CLASSES_COUNT, LEARNING_RATE)
