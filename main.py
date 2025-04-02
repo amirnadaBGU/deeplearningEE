@@ -5,7 +5,6 @@ from torchvision.transforms import ToTensor
 from torch.utils.data import DataLoader, random_split, Subset
 from torchviz import make_dot
 from torchsummary import summary
-from torchmetrics.classification import ConfusionMatrix
 import matplotlib.pyplot as plt
 import datetime
 import numpy as np
@@ -16,11 +15,12 @@ from sklearn.model_selection import StratifiedShuffleSplit
 from collections import Counter
 import random
 from torchvision import transforms
+from torchmetrics.classification import MulticlassF1Score
 
 BATCH_SIZE = 256
 CLASSES_COUNT = 10
 LEARNING_RATE = 0.001
-EPOCHS_COUNT = 25 # changed to 25 to oveserve overfit in section 2 (I think that accroding to forum conditions need to be the same)
+EPOCHS_COUNT = 4 # changed to 25 to oveserve overfit in section 2 (I think that accroding to forum conditions need to be the same)
 TRAIN_SPLIT_RATIO = 0.8 # 0.8 - regular split. ~0.0005 for receiving an overfit
 
 DEBUG = True
@@ -170,6 +170,55 @@ def plot_categories_histograms(set,header):
     plt.tight_layout()
     plt.show()
 
+
+def plot_train_progress(train_losses, validation_losses):
+    assert(len(train_losses) == len(validation_losses))
+    x1 = np.arange(len(train_losses))
+    validation_x_values = x1[~np.isnan(validation_losses)]
+    validation_y_values = np.array(validation_losses)[~np.isnan(validation_losses)]
+    filtered = gaussian_filter1d(train_losses, sigma=2)
+    plt.plot(x1, filtered, label='Train Loss', linestyle="solid", color="blue")
+    plt.plot(validation_x_values, validation_y_values, linestyle='solid', color="red", zorder=4, label='Validation Loss')
+    plt.xlabel("mini batches")
+    plt.ylabel("loss")
+    plt.legend()
+    plt.title("Train vs. Validation Loss Progress")
+    plt.savefig(f"image_progress_{datetime.datetime.now()}.png".replace('-', '_').
+                replace(':', '_').replace(' ', "_"))
+    plt.show()
+
+
+def plot_conf_matrix(all_labels, all_predicted):
+    sklrn_conf_mat = confusion_matrix(np.array(all_labels), np.array(all_predicted))
+    normalized_conf_mat = sklrn_conf_mat.astype('float') / sklrn_conf_mat.sum(axis=1)[:, np.newaxis]
+
+    sns.heatmap(normalized_conf_mat, annot=True, fmt=".2f", cmap="Greens", xticklabels=range(CLASSES_COUNT),
+                yticklabels=range(CLASSES_COUNT))
+    plt.xlabel("Predictaded")
+    plt.ylabel("True Labels")
+    plt.title("Test Results: Confusion Matrix")
+    plt.savefig(
+        f"confusion_matrix_{datetime.datetime.now()}.png".replace('-', '_').
+        replace(':', '_').replace(' ', "_"))
+    plt.show()
+
+
+def plot_f1_scores(all_predicted, all_labels):
+    f1 = MulticlassF1Score(num_classes=CLASSES_COUNT, average=None)
+    f1_score = f1(torch.tensor(all_predicted), torch.tensor(all_labels))
+    class_names = [str(i) for i in range(10)]
+    plt.figure(figsize=(8, 5))
+    plt.bar(class_names, f1_score, alpha=0.7, edgecolor='black')
+    plt.xlabel("Classes")
+    plt.ylabel("F1 Score")
+    plt.title(f"F1 Score per Class. Macro Value:{np.average(f1_score):.4f}")
+    for i, v in enumerate(f1_score):
+        plt.text(i, v + 0.02, f"{v:.2f}", ha='center', fontsize=12, fontweight='bold')
+    plt.ylim(0, 1.1)
+    plt.grid(axis='y', linestyle='--', alpha=0.5)
+    plt.show()
+    print(f1_score)
+
 def load_test_set(test_data, batch_size):
     return DataLoader(dataset=test_data, batch_size=batch_size, shuffle=False)
 
@@ -222,22 +271,8 @@ def train(model:MyNet, train_data, split_ratio, batch_size, classes_count, learn
             if correct_count / total_images > 0.99:
                 print("Stopping the training")
                 break
-    assert(len(train_losses) == len(validation_losses))
-    x1 = np.arange(len(train_losses))
-    validation_x_values = x1[~np.isnan(validation_losses)]
-    validation_y_values = np.array(validation_losses)[~np.isnan(validation_losses)]
-    filtered = gaussian_filter1d(train_losses, sigma=2)
-    plt.plot(x1, filtered, label='Train Loss', linestyle="solid", color="blue")
-    #plt.scatter(x1, validation_losses, color="red", marker="s", s=80, zorder=3)
-    plt.plot(validation_x_values, validation_y_values, linestyle='solid', color="red", zorder=4, label='Validation Loss')
-    plt.xlabel("mini batches")
-    plt.ylabel("loss")
-    plt.legend()
-    #ax2 = plt.twiny()
-    #ax2.set_xticks(validation_x_values)
-    plt.title("Train vs. Validation Loss Progress")
-    plt.savefig(f"image_progress_{datetime.datetime.now()}.png".replace('-', '_').replace(':', '_').replace(' ', "_"))
-    plt.show()
+    plot_train_progress(train_losses, validation_losses)
+
 
 def test(model: MyNet, test_data: object, batch_size: object):
     with torch.no_grad():
@@ -257,32 +292,8 @@ def test(model: MyNet, test_data: object, batch_size: object):
             correct_cout += (predicted == labels).sum().item()
             del images, labels, outputs
         print(f"Test results: accuracy of {correct_cout / total_count}")
-
-        sklrn_conf_mat = confusion_matrix(np.array(all_labels), np.array(all_predicted))
-        normalized_conf_mat = sklrn_conf_mat.astype('float') / sklrn_conf_mat.sum(axis=1)[:, np.newaxis]
-
-        sns.heatmap(normalized_conf_mat, annot=True, fmt=".2f", cmap="Greens", xticklabels=range(CLASSES_COUNT), yticklabels=range(CLASSES_COUNT))
-        plt.xlabel("Predictaded")
-        plt.ylabel("True Labels")
-        plt.title("Test Results: Confusion Matrix")
-        plt.savefig(
-            f"confusion_matrix_{datetime.datetime.now()}.png".replace('-', '_').replace(':', '_').replace(' ', "_"))
-        plt.show()
-        """
-        TP = 0
-        TN = 1
-        FP = 2
-        FN = 3
-        results_hist_by_class = np.zeros((CLASSES_COUNT, 4))
-        for class_idx in range(CLASSES_COUNT):
-            for i, label  in enumerate(all_labels):
-                predicted = all_predicted[i]
-                if label == class_idx:
-                    if label == predicted:
-                        results_hist_by_class[class_idx, TP] += 1
-                    else:
-                        results_hist_by_class[class_idx, TP] += 1
-        """
+        plot_conf_matrix(all_labels, all_predicted)
+        plot_f1_scores(all_predicted, all_labels)
 
 def load_mnist():
     train_data = datasets.MNIST(root='./mnist/', download=True, train=True, transform=ToTensor())
@@ -308,7 +319,7 @@ if __name__ == '__main__':
     train_data, test_data = load_mnist()
     print("creating the model")
     model = MyNet(CLASSES_COUNT).to(DEVICE)
-    # summary(model, (1, 28, 28))
+    summary(model, (1, 28, 28))
     #visualize_model_as_graph(model)
     #inspect_minist_data(train_data, test_data)
 
