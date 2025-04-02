@@ -18,7 +18,8 @@ CLASSES_COUNT = 10
 LEARNING_RATE = 0.0005
 EPOCHS_COUNT = 10
 TRAIN_SPLIT_RATIO = 0.8
-
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(f"Device used for learning: {DEVICE}")
 
 class MyNet(nn.Module):
     def __init__(self, classes_count):
@@ -83,6 +84,9 @@ def train(model:MyNet, train_data, split_ratio, batch_size, classes_count, learn
         #train the epoch
         print(f"starting epoch {epoch+1}")
         for i, (images, labels) in enumerate(train_loader):
+            images = images.to(DEVICE)
+            labels = labels.to(DEVICE)
+
             outputs = model(images)
             loss = loss_function(outputs, labels)
             optimizer.zero_grad()
@@ -100,6 +104,8 @@ def train(model:MyNet, train_data, split_ratio, batch_size, classes_count, learn
             acc_loss = 0
             acc_items = 0
             for i, (images, labels) in enumerate(validation_loader):
+                images = images.to(DEVICE)
+                labels = labels.to(DEVICE)
                 outputs = model(images)
                 val, predicted = torch.max(outputs.data, dim=1)
                 total_images += len(images)
@@ -141,6 +147,8 @@ def test(model: MyNet, test_data: object, batch_size: object):
         all_labels = []
         test_set = load_test_set(test_data, batch_size=batch_size)
         for images, labels in test_set:
+            images = images.to(DEVICE)
+            labels = labels.to(DEVICE)
             outputs = model(images)
             vals, predicted = torch.max(outputs.data, 1)
             all_predicted += predicted.tolist()
@@ -198,8 +206,8 @@ if __name__ == '__main__':
     print("loading data set")
     train_data, test_data = load_mnist()
     print("creating the model")
-    model = MyNet(CLASSES_COUNT)
-    summary(model, (1, 28, 28))
+    model = MyNet(CLASSES_COUNT).to(DEVICE)
+    # summary(model, (1, 28, 28))
     #visualize_model_as_graph(model)
     #inspect_minist_data(train_data, test_data)
     print("training...")
