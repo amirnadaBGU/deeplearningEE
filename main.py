@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 from torchvision import datasets
 from torchvision.transforms import ToTensor
-from torch.utils.data import DataLoader, random_split
+from torch.utils.data import DataLoader, random_split, Subset
 from torchviz import make_dot
 from torchsummary import summary
 from torchmetrics.classification import ConfusionMatrix
@@ -12,12 +12,15 @@ import numpy as np
 import seaborn as sns
 from sklearn.metrics import confusion_matrix
 from scipy.ndimage import gaussian_filter1d
+from sklearn.model_selection import StratifiedShuffleSplit
+from collections import Counter
+
 
 BATCH_SIZE = 256
 CLASSES_COUNT = 10
 LEARNING_RATE = 0.0005
-EPOCHS_COUNT = 10
-TRAIN_SPLIT_RATIO = 0.8
+EPOCHS_COUNT = 30
+TRAIN_SPLIT_RATIO = 0.001
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Device used for learning: {DEVICE}")
 
@@ -59,13 +62,65 @@ def visualize_model_as_graph(model:MyNet):
     dot.render("model_graph", format='png')
 
 
-def load_train_set(origin_train_data, split_ratio, batch_size):
+def load_train_set(origin_train_data, split_ratio, batch_size,force_balanced_categories=False):
     train_size = int(len(origin_train_data) * split_ratio)
     validation_size = len(origin_train_data) - train_size
-    train_set, validation_set = random_split(origin_train_data, [train_size, validation_size])
+    if force_balanced_categories:
+        targets = origin_train_data.targets
+        splitter = StratifiedShuffleSplit(n_splits=1, test_size=validation_size / (train_size + validation_size))
+        for train_idx, val_idx in splitter.split(X=range(len(targets)), y=targets):
+            train_set = Subset(origin_train_data, train_idx)
+            validation_set = Subset(origin_train_data, val_idx)
+    else:
+        train_set, validation_set = random_split(origin_train_data, [train_size, validation_size])
     train_loader = DataLoader(dataset=train_set, batch_size=batch_size, shuffle=True)
     validation_loader = DataLoader(dataset=validation_set, batch_size=batch_size, shuffle=False)
+    # Verify categories are balanced:
+    plot_categories_histograms(train_set,validation_set)
     return train_loader, validation_loader
+
+def plot_categories_histograms(train_set, validation_set):
+    # Extract class labels from the original dataset (Subset stores indices)
+    train_labels = [train_set.dataset.targets[i] for i in train_set.indices]
+    val_labels = [validation_set.dataset.targets[i] for i in validation_set.indices]
+
+    # Creating histogram dicts:
+    train_counting_dict={}
+    val_counting_dict={}
+    for k in range(CLASSES_COUNT):
+        train_counting_dict[k]=0
+        val_counting_dict[k] = 0
+    # Count occurrences of each class
+    for i,value in enumerate(np.array(train_labels)):
+        train_counting_dict[value] +=1
+    for i,value in enumerate(np.array(val_labels)):
+        val_counting_dict[value] +=1
+
+
+    # Extract class indices and corresponding counts
+    classes = list(train_counting_dict.keys())
+    train_counts = [train_counting_dict[k] for k in classes]
+    val_counts = [val_counting_dict[k] for k in classes]
+
+    # Plotting training set histogram
+    plt.figure(figsize=(8, 4))
+    plt.bar(classes, train_counts)
+    plt.xlabel('Class')
+    plt.ylabel('Count')
+    plt.title('Training Set Class Distribution')
+    plt.xticks(classes)
+    plt.tight_layout()
+    plt.show()
+
+    # Plotting validation set histogram
+    plt.figure(figsize=(8, 4))
+    plt.bar(classes, val_counts)
+    plt.xlabel('Class')
+    plt.ylabel('Count')
+    plt.title('Validation Set Class Distribution')
+    plt.xticks(classes)
+    plt.tight_layout()
+    plt.show()
 
 
 def load_test_set(test_data, batch_size):
