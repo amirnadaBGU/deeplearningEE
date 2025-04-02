@@ -126,9 +126,9 @@ def train(model:MyNet, train_data, split_ratio, batch_size, classes_count, learn
     validation_x_values = x1[~np.isnan(validation_losses)]
     validation_y_values = np.array(validation_losses)[~np.isnan(validation_losses)]
     filtered = gaussian_filter1d(train_losses, sigma=2)
-    plt.plot(x1, filtered, label='train losses', linestyle="solid", color="blue")
+    plt.plot(x1, filtered, label='Train Loss', linestyle="solid", color="blue")
     #plt.scatter(x1, validation_losses, color="red", marker="s", s=80, zorder=3)
-    plt.plot(validation_x_values, validation_y_values, linestyle='solid', color="red", zorder=4, label='validation')
+    plt.plot(validation_x_values, validation_y_values, linestyle='solid', color="red", zorder=4, label='Validation Loss')
     plt.xlabel("mini batches")
     plt.ylabel("loss")
     plt.legend()
