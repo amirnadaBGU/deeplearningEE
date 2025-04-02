@@ -61,8 +61,7 @@ def visualize_model_as_graph(model:MyNet):
     print(dot)
     dot.render("model_graph", format='png')
 
-
-def load_train_set(origin_train_data, split_ratio, batch_size,force_balanced_categories=False):
+def load_train_set(origin_train_data, split_ratio, batch_size,force_balanced_categories=True):
     train_size = int(len(origin_train_data) * split_ratio)
     validation_size = len(origin_train_data) - train_size
     if force_balanced_categories:
@@ -76,56 +75,52 @@ def load_train_set(origin_train_data, split_ratio, batch_size,force_balanced_cat
     train_loader = DataLoader(dataset=train_set, batch_size=batch_size, shuffle=True)
     validation_loader = DataLoader(dataset=validation_set, batch_size=batch_size, shuffle=False)
     # Verify categories are balanced:
-    plot_categories_histograms(train_set,validation_set)
+    sets_dict = {"Train": train_set, "Validation": validation_set}
+    visualize_data_splits(sets_dict)
     return train_loader, validation_loader
 
-def plot_categories_histograms(train_set, validation_set):
+def plot_categories_histograms(set,header):
     # Extract class labels from the original dataset (Subset stores indices)
-    train_labels = [train_set.dataset.targets[i] for i in train_set.indices]
-    val_labels = [validation_set.dataset.targets[i] for i in validation_set.indices]
-
+    # Supports subset or full dataset via try except mechanism on input
+    try:
+        labels = [set.dataset.targets[i] for i in set.indices]
+    except:
+        labels = [set.targets[i] for i in range(len(set.targets))]
     # Creating histogram dicts:
-    train_counting_dict={}
-    val_counting_dict={}
+    counting_dict={}
     for k in range(CLASSES_COUNT):
-        train_counting_dict[k]=0
-        val_counting_dict[k] = 0
+        counting_dict[k]=0
     # Count occurrences of each class
-    for i,value in enumerate(np.array(train_labels)):
-        train_counting_dict[value] +=1
-    for i,value in enumerate(np.array(val_labels)):
-        val_counting_dict[value] +=1
-
+    for i,value in enumerate(np.array(labels)):
+        counting_dict[value] +=1
 
     # Extract class indices and corresponding counts
-    classes = list(train_counting_dict.keys())
-    train_counts = [train_counting_dict[k] for k in classes]
-    val_counts = [val_counting_dict[k] for k in classes]
+    classes = list(counting_dict.keys())
+    counts = [counting_dict[k] for k in classes]
+
+    total = sum(counts)
+    percentages = [count / total * 100 for count in counts]
 
     # Plotting training set histogram
     plt.figure(figsize=(8, 4))
-    plt.bar(classes, train_counts)
+    bars = plt.bar(classes, counts)
     plt.xlabel('Class')
     plt.ylabel('Count')
-    plt.title('Training Set Class Distribution')
+    plt.title(f'{header} Set Class Distribution')
     plt.xticks(classes)
     plt.tight_layout()
-    plt.show()
 
-    # Plotting validation set histogram
-    plt.figure(figsize=(8, 4))
-    plt.bar(classes, val_counts)
-    plt.xlabel('Class')
-    plt.ylabel('Count')
-    plt.title('Validation Set Class Distribution')
-    plt.xticks(classes)
+    # Add percentage labels on top of bars
+    for bar, percent in zip(bars, percentages):
+        height = bar.get_height()
+        plt.text(bar.get_x() + bar.get_width() / 2, height , f'{percent:.1f}%',
+                 ha='center', va='bottom', fontsize=10)
+
     plt.tight_layout()
     plt.show()
-
 
 def load_test_set(test_data, batch_size):
     return DataLoader(dataset=test_data, batch_size=batch_size, shuffle=False)
-
 
 def train(model:MyNet, train_data, split_ratio, batch_size, classes_count, learning_rate):
     print("loading the set into train and validation")
@@ -193,7 +188,6 @@ def train(model:MyNet, train_data, split_ratio, batch_size, classes_count, learn
     plt.savefig(f"image_progress_{datetime.datetime.now()}.png".replace('-', '_').replace(':', '_').replace(' ', "_"))
     plt.show()
 
-
 def test(model: MyNet, test_data: object, batch_size: object):
     with torch.no_grad():
         correct_cout = 0
@@ -239,13 +233,10 @@ def test(model: MyNet, test_data: object, batch_size: object):
                         results_hist_by_class[class_idx, TP] += 1
         """
 
-
-
 def load_mnist():
     train_data = datasets.MNIST(root='./mnist/', download=True, train=True, transform=ToTensor())
     test_data = datasets.MNIST(root='./mnist/', download=True, train=False, transform=ToTensor())
     return train_data, test_data
-
 
 def inspect_minist_data(train_data, test_data):
     print(type(train_data))
@@ -256,6 +247,10 @@ def inspect_minist_data(train_data, test_data):
     plt.title(test_data.classes[label])
     plt.show()
 
+def visualize_data_splits(sets_dict):
+    for key, dataset in sets_dict.items():
+        plot_categories_histograms(dataset, key)
+    return
 
 if __name__ == '__main__':
     print("loading data set")
@@ -265,6 +260,10 @@ if __name__ == '__main__':
     # summary(model, (1, 28, 28))
     #visualize_model_as_graph(model)
     #inspect_minist_data(train_data, test_data)
+
+    # Only for debug Purposes for seif 2
+    visualize_data_splits({"Test":test_data})
+
     print("training...")
     train(model, train_data, TRAIN_SPLIT_RATIO, BATCH_SIZE, CLASSES_COUNT, LEARNING_RATE)
     print("testing...")
