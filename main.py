@@ -21,7 +21,7 @@ BATCH_SIZE = 256
 CLASSES_COUNT = 10
 LEARNING_RATE = 0.001
 EPOCHS_COUNT = 20 # changed to 25 to oveserve overfit in section 2 (I think that accroding to forum conditions need to be the same)
-TRAIN_SPLIT_RATIO = 0.001 # 0.8 - regular split. ~0.0005 for receiving an overfit
+TRAIN_SPLIT_RATIO = 0.8 # 0.8 - regular split. ~0.0005 for receiving an overfit
 
 DEBUG = True
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -51,25 +51,6 @@ class MyNet(nn.Module):
         out = self.relu_1(self.linear_1(out))
         out = self.linear_2(out)
         return out
-
-class MyNet2(nn.Module):
-    def __init__(self,classes_count):
-        super(MyNet2, self).__init__()
-        self.conv1 = nn.Conv2d(1, 5, 5)
-        self.pool = nn.MaxPool2d(2, 2)
-        self.conv2 = nn.Conv2d(5, 16, 5)
-        self.fc1 = nn.Linear(16 * 4 * 4, 120)
-        self.fc2 = nn.Linear(120, 64)
-        self.fc3 = nn.Linear(64, classes_count)
-
-    def forward(self, x):
-        x = self.pool(nn.functional.relu(self.conv1(x)))
-        x = self.pool(nn.functional.relu(self.conv2(x)))
-        x = x.view(-1, 16 * 4 * 4)
-        x = nn.functional.relu(self.fc1(x))
-        x = nn.functional.relu(self.fc2(x))
-        x = self.fc3(x) # softmax is included in the loss function
-        return x
 
 def visualize_model_as_graph(model:MyNet):
     dummy_input = torch.randn(1, 1, 28, 28) #single MNIST image size
@@ -168,17 +149,15 @@ def plot_categories_histograms(set,header):
     plt.tight_layout()
     plt.show()
 
-
 def plot_train_progress(train_losses, validation_losses, secondary_axes=True):
     assert(len(train_losses) == len(validation_losses))
     x1 = np.arange(len(train_losses))
     validation_x_values = x1[~np.isnan(validation_losses)]
     validation_y_values = np.array(validation_losses)[~np.isnan(validation_losses)]
 
-
     filtered = gaussian_filter1d(train_losses, sigma=2)
 
-    fix, ax = plt.subplots()
+    fig, ax = plt.subplots()  # Changed 'fix' to 'fig' for clarity
     ax.plot(x1, filtered, label='Train Loss', linestyle="solid", color="blue")
     ax.plot(validation_x_values, validation_y_values, linestyle='solid', color="red", zorder=4, label='Validation Loss')
     ax.set_xlabel("Mini Batch")
@@ -189,17 +168,17 @@ def plot_train_progress(train_losses, validation_losses, secondary_axes=True):
     if secondary_axes:
         epoch_numbers = np.arange(0, len(validation_x_values) + 1)
         validation_x_values_with_0 = np.insert(validation_x_values, 0, 0)
-        ax2 = ax.twiny() # twin x-axis
+        ax2 = ax.twiny()  # twin x-axis
         ax2.set_xlim(ax.get_xlim())  # align the secondary x-axis with the primary
         ax2.set_xticks(validation_x_values_with_0)
         ax2.set_xticklabels(epoch_numbers)
         ax2.set_xlabel("Epoch")
 
-    plt.savefig(f"image_progress_{datetime.datetime.now()}.png".replace('-', '_').
-                replace(':', '_').replace(' ', "_"))
-
+    # Adjust layout so nothing is clipped
+    plt.tight_layout()
+    filename = f"image_progress_{datetime.datetime.now()}.png".replace('-', '_').replace(':', '_').replace(' ', "_")
+    plt.savefig(filename, bbox_inches='tight')
     plt.show()
-
 
 def plot_conf_matrix(all_labels, all_predicted):
     sklrn_conf_mat = confusion_matrix(np.array(all_labels), np.array(all_predicted))
@@ -214,7 +193,6 @@ def plot_conf_matrix(all_labels, all_predicted):
         f"confusion_matrix_{datetime.datetime.now()}.png".replace('-', '_').
         replace(':', '_').replace(' ', "_"))
     plt.show()
-
 
 def plot_f1_scores(all_predicted, all_labels):
     f1 = MulticlassF1Score(num_classes=CLASSES_COUNT, average=None)
@@ -281,11 +259,13 @@ def train(model:MyNet, train_data, split_ratio, batch_size, classes_count, learn
                 del images, labels, outputs
             validation_losses[-1] = (acc_loss / acc_items)
             print(f"validation accuracy ratio: {correct_count / total_images}")
-            if correct_count / total_images > 0.99:
-                print("Stopping the training")
-                break
-    plot_train_progress(train_losses, validation_losses)
 
+            # TODO: I comment this out because it sometimes stops the training
+            # Todo: (I think the break command stops training and assumed this is not your original intention)
+            # if correct_count / total_images > 0.99:
+            #     print("Stopping the training")
+            #     break
+    plot_train_progress(train_losses, validation_losses)
 
 def test(model: MyNet, test_data: object, batch_size: object):
     with torch.no_grad():
