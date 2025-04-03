@@ -20,8 +20,9 @@ from torchmetrics.classification import MulticlassF1Score
 BATCH_SIZE = 256
 CLASSES_COUNT = 10
 LEARNING_RATE = 0.001
-EPOCHS_COUNT = 20 # changed to 25 to oveserve overfit in section 2 (I think that accroding to forum conditions need to be the same)
-TRAIN_SPLIT_RATIO = 0.002 # 0.8 - regular split. ~0.0005 for receiving an overfit
+EPOCHS_COUNT = 10 # changed to 25 to oveserve overfit in section 2 (I think that accroding to forum conditions need to be the same)
+TRAIN_SPLIT_RATIO = 0.8 # 0.8 - regular split. ~0.0005 for receiving an overfit
+MNIST_IMAGE_DIM = 28
 
 DEBUG = True
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -53,14 +54,16 @@ class MyNet(nn.Module):
         return out
 
 def visualize_model_as_graph(model:MyNet):
-    dummy_input = torch.randn(1, 1, 28, 28) #single MNIST image size
+    dummy_input = torch.randn(1, 1, MNIST_IMAGE_DIM, MNIST_IMAGE_DIM) #single MNIST image size
     dummy_result = model(dummy_input)
     dot = make_dot(dummy_result, params=dict(model.named_parameters()))
     print(type(dot))
     print(dot)
     dot.render("model_graph", format='png')
 
-def load_train_set(origin_train_data, split_ratio, batch_size,force_balanced_categories=True):
+
+def load_train_set(origin_train_data, split_ratio, batch_size,force_balanced_categories=True, augmentation=False,
+                   augmentation_params=None):
     train_size = int(len(origin_train_data) * split_ratio)
     validation_size = len(origin_train_data) - train_size
     if force_balanced_categories:
@@ -71,6 +74,24 @@ def load_train_set(origin_train_data, split_ratio, batch_size,force_balanced_cat
             validation_set = Subset(origin_train_data, val_idx)
     else:
         train_set, validation_set = random_split(origin_train_data, [train_size, validation_size])
+    train_transform = None
+    if augmentation:
+        rotation_limit = augmentation_params["rotation limit"]
+        probability = augmentation_params["probability"]
+        noise_amp = augmentation_params["noise amplitude"]
+        scale_lim = augmentation_params["scale_limit"]
+        train_transform = transforms.Compose([
+            transforms.RandomApply([transforms.RandomRotation(degrees=(rotation_limit, rotation_limit))], p = probability),
+            transforms.RandomHorizontalFlip(p = probability),
+            transforms.ToTensor(),
+            transforms.RandomApply([transforms.Lambda(lambda img: torch.clamp(img + torch.randn_like(img) * noise_amp, 0, 1))], p=probability),
+            transforms.RandomResizedCrop(size=(MNIST_IMAGE_DIM,MNIST_IMAGE_DIM), scale=(scale_lim, 1.0))
+        ])
+    else:
+        train_transform = transforms.Compose([ToTensor()])
+    validation_transform = transforms.Compose([ToTensor()])
+    train_set.dataset.transform = train_transform
+    validation_set.dataset.transform = validation_transform
     train_loader = DataLoader(dataset=train_set, batch_size=batch_size, shuffle=True)
     validation_loader = DataLoader(dataset=validation_set, batch_size=batch_size, shuffle=False)
 
@@ -79,35 +100,6 @@ def load_train_set(origin_train_data, split_ratio, batch_size,force_balanced_cat
         sets_dict = {"Train": train_set, "Validation": validation_set}
         visualize_data_splits(sets_dict)
     return train_loader, validation_loader
-
-def add_augmentation_using_torchvision(train_set, method, percentage):
-    # Get the original transform if it exists
-    original_transform = train_set.transform if hasattr(train_set, 'transform') else None
-
-    # Define some augmentation options
-    augmentation_methods = {
-        'flip': transforms.RandomHorizontalFlip(p=1.0),
-        'rotate': transforms.RandomRotation(degrees=15),
-        'color_jitter': transforms.ColorJitter(brightness=0.5, contrast=0.5),
-        'crop': transforms.RandomResizedCrop(size=(224, 224), scale=(0.8, 1.0))
-    }
-
-    if method not in augmentation_methods:
-        raise ValueError(f"Unsupported augmentation method: {method}")
-
-    # Decide whether to apply augmentation to each image
-    def apply_with_probability(img):
-        if random.random() < percentage:
-            return augmentation_methods[method](img)
-        return img
-
-    # Compose the new transform
-    train_set.transform = transforms.Compose([
-        transforms.Lambda(apply_with_probability),
-        original_transform if original_transform else transforms.ToTensor()
-    ])
-
-    return train_set
 
 def plot_categories_histograms(set,header):
     # Extract class labels from the original dataset (Subset stores indices)
@@ -213,9 +205,10 @@ def plot_f1_scores(all_predicted, all_labels):
 def load_test_set(test_data, batch_size):
     return DataLoader(dataset=test_data, batch_size=batch_size, shuffle=False)
 
-def train(model:MyNet, train_data, split_ratio, batch_size, classes_count, learning_rate):
+def train(model:MyNet, train_data, split_ratio, batch_size, classes_count, learning_rate, augmentation=False, augmentation_params=None):
     print("loading the set into train and validation")
-    train_loader, validation_loader = load_train_set(train_data, split_ratio, batch_size)
+    train_loader, validation_loader = load_train_set(train_data, split_ratio, batch_size,
+                                                     augmentation=augmentation, augmentation_params=augmentation_params)
     loss_function = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
     steps_count = len(train_loader)
@@ -289,7 +282,7 @@ def test(model: MyNet, test_data: object, batch_size: object):
         plot_f1_scores(all_predicted, all_labels)
 
 def load_mnist():
-    train_data = datasets.MNIST(root='./mnist/', download=True, train=True, transform=ToTensor())
+    train_data = datasets.MNIST(root='./mnist/', download=True, train=True)
     test_data = datasets.MNIST(root='./mnist/', download=True, train=False, transform=ToTensor())
     return train_data, test_data
 
@@ -307,6 +300,35 @@ def visualize_data_splits(sets_dict):
         plot_categories_histograms(dataset, key)
     return
 
+
+def visualize_augmentation_example(train_data):
+    original_image,_ = train_data[138]
+    augmentations = {
+        "Original": transforms.ToTensor(),
+        "Rotated 30 degrees": transforms.RandomRotation((30,30)),
+        "Horizontal Flip": transforms.RandomHorizontalFlip(p=1),
+        "Added Gaussian Noise":
+            transforms.Compose([
+                transforms.ToTensor(),
+                transforms.Lambda(lambda img: torch.clamp(img + torch.randn_like(img) * 0.2, 0, 1))
+                ]),
+        "Cropped and rescaled by 0.6": transforms.RandomResizedCrop(size=(MNIST_IMAGE_DIM, MNIST_IMAGE_DIM), scale=(0.6, 0.6))
+    }
+    transformed_images = [augmentations[key](original_image) for key in augmentations]
+    transformed_images = [img.squeeze() if isinstance(img, torch.Tensor) else np.array(img) for img in transformed_images]
+
+    fig, axes = plt.subplots(1, 5, figsize=(18,6))
+
+    for i, (key, image) in enumerate(zip(augmentations.keys(), transformed_images)):
+        axes[i].imshow(image, cmap="gray")
+        axes[i].set_title(key)
+        axes[i].axis("off")
+    plt.show()
+
+
+
+
+
 if __name__ == '__main__':
     print("loading data set")
     train_data, test_data = load_mnist()
@@ -319,9 +341,17 @@ if __name__ == '__main__':
     # Only for debug Purposes for seif 2
     if DEBUG:
         visualize_data_splits({"Test":test_data})
-
+        visualize_augmentation_example(train_data)
+    augmentation = False
+    augmentation_params = None
     print("training...")
-    train(model, train_data, TRAIN_SPLIT_RATIO, BATCH_SIZE, CLASSES_COUNT, LEARNING_RATE)
+
+    # uncomment next 2 lines for augmentation run, comment them for using only original images
+    augmentation = True
+    augmentation_params = {"rotation limit": 20, "probability": 0.3, "noise amplitude": 0.3, "scale_limit": 0.5}
+
+    train(model, train_data, TRAIN_SPLIT_RATIO, BATCH_SIZE, CLASSES_COUNT, LEARNING_RATE,
+          augmentation=augmentation, augmentation_params=augmentation_params)
     print("testing...")
     test(model,test_data, BATCH_SIZE)
     print("done")
