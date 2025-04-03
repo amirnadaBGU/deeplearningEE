@@ -21,7 +21,7 @@ BATCH_SIZE = 256
 CLASSES_COUNT = 10
 LEARNING_RATE = 0.001
 EPOCHS_COUNT = 20 # changed to 25 to oveserve overfit in section 2 (I think that accroding to forum conditions need to be the same)
-TRAIN_SPLIT_RATIO = 0.8 # 0.8 - regular split. ~0.0005 for receiving an overfit
+TRAIN_SPLIT_RATIO = 0.002 # 0.8 - regular split. ~0.0005 for receiving an overfit
 
 DEBUG = True
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
