@@ -21,7 +21,7 @@ BATCH_SIZE = 256
 CLASSES_COUNT = 10
 LEARNING_RATE = 0.001
 EPOCHS_COUNT = 20 # changed to 25 to oveserve overfit in section 2 (I think that accroding to forum conditions need to be the same)
-TRAIN_SPLIT_RATIO = 0.8 # 0.8 - regular split. ~0.0005 for receiving an overfit
+TRAIN_SPLIT_RATIO = 0.001 # 0.8 - regular split. ~0.0005 for receiving an overfit
 
 DEBUG = True
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -36,23 +36,20 @@ class MyNet(nn.Module):
         self.mp_1 = nn.MaxPool2d(kernel_size=2, stride=2)  # in: 28X28X32, out: 14X14X32
         self.conv_3 = nn.Conv2d(in_channels=32, out_channels=64, kernel_size=3,
                                 padding=1)  # in: 14X14X32, out: 14X14X64
-        self.mp_2 = nn.MaxPool2d(kernel_size=2, stride=2)  # in: 14X14X64, out: 7X7X64
         self.linear_1 = nn.Linear(3136, 300)  # in: 7X7X32, out: 14X14X64
         self.relu_1 = nn.ReLU()
         self.linear_2 = nn.Linear(300, classes_count)
         self.sm_1 = nn.Softmax(dim=1)
 
     def forward(self, x):
-        out = self.conv_1(x)
-        out = self.conv_2(out)
+        out = self.relu_1(self.conv_1(x))
+        out = self.relu_1(self.conv_2(out))
         out = self.mp_1(out)
-        out = self.conv_3(out)
-        out = self.mp_2(out)
+        out = self.relu_1(self.conv_3(out))
+        out = self.mp_1(out)
         out = out.reshape(out.size(0), -1)
-        out = self.linear_1(out)
-        out = self.relu_1(out)
+        out = self.relu_1(self.linear_1(out))
         out = self.linear_2(out)
-        out = self.sm_1(out)
         return out
 
 class MyNet2(nn.Module):
@@ -64,6 +61,7 @@ class MyNet2(nn.Module):
         self.fc1 = nn.Linear(16 * 4 * 4, 120)
         self.fc2 = nn.Linear(120, 64)
         self.fc3 = nn.Linear(64, classes_count)
+
     def forward(self, x):
         x = self.pool(nn.functional.relu(self.conv1(x)))
         x = self.pool(nn.functional.relu(self.conv2(x)))
@@ -171,20 +169,35 @@ def plot_categories_histograms(set,header):
     plt.show()
 
 
-def plot_train_progress(train_losses, validation_losses):
+def plot_train_progress(train_losses, validation_losses, secondary_axes=True):
     assert(len(train_losses) == len(validation_losses))
     x1 = np.arange(len(train_losses))
     validation_x_values = x1[~np.isnan(validation_losses)]
     validation_y_values = np.array(validation_losses)[~np.isnan(validation_losses)]
+
+
     filtered = gaussian_filter1d(train_losses, sigma=2)
-    plt.plot(x1, filtered, label='Train Loss', linestyle="solid", color="blue")
-    plt.plot(validation_x_values, validation_y_values, linestyle='solid', color="red", zorder=4, label='Validation Loss')
-    plt.xlabel("mini batches")
-    plt.ylabel("loss")
-    plt.legend()
-    plt.title("Train vs. Validation Loss Progress")
+
+    fix, ax = plt.subplots()
+    ax.plot(x1, filtered, label='Train Loss', linestyle="solid", color="blue")
+    ax.plot(validation_x_values, validation_y_values, linestyle='solid', color="red", zorder=4, label='Validation Loss')
+    ax.set_xlabel("Mini Batch")
+    ax.set_ylabel("Loss")
+    ax.legend()
+    ax.set_title("Train vs. Validation Loss Progress")
+
+    if secondary_axes:
+        epoch_numbers = np.arange(0, len(validation_x_values) + 1)
+        validation_x_values_with_0 = np.insert(validation_x_values, 0, 0)
+        ax2 = ax.twiny() # twin x-axis
+        ax2.set_xlim(ax.get_xlim())  # align the secondary x-axis with the primary
+        ax2.set_xticks(validation_x_values_with_0)
+        ax2.set_xticklabels(epoch_numbers)
+        ax2.set_xlabel("Epoch")
+
     plt.savefig(f"image_progress_{datetime.datetime.now()}.png".replace('-', '_').
                 replace(':', '_').replace(' ', "_"))
+
     plt.show()
 
 
