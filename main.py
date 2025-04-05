@@ -30,8 +30,9 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Device used for learning: {DEVICE}")
 
 class MyNet(nn.Module):
-    def __init__(self, classes_count,dropout):
+    def __init__(self, classes_count,dropout=False):
         super(MyNet, self).__init__()
+        self.dropout = dropout
         self.conv_1 = nn.Conv2d(in_channels=1, out_channels=16, kernel_size=3, padding=1)  # in: 28X28, out: 28X28X16
         self.conv_2 = nn.Conv2d(in_channels=16, out_channels=32, kernel_size=3,
                                 padding=1)  # in: 28X28X16, out: 28X28X32
@@ -47,29 +48,29 @@ class MyNet(nn.Module):
     def forward(self, x):
         out = self.relu_1(self.conv_1(x))
 
-        if dropout:
+        if self.dropout:
             out = self.dropout_fc(out)
 
         out = self.relu_1(self.conv_2(out))
 
-        if dropout:
+        if self.dropout:
             out = self.dropout_fc(out)
 
         out = self.mp_1(out)
 
-        if dropout:
+        if self.dropout:
             out = self.dropout_fc(out)
 
         out = self.relu_1(self.conv_3(out))
         out = self.mp_1(out)
-        if dropout:
+        if self.dropout:
             out = self.dropout_fc(out)
 
 
         out = out.reshape(out.size(0), -1)
         out = self.relu_1(self.linear_1(out))
 
-        if dropout:
+        if self.dropout:
             out = self.dropout_fc(out)
 
         out = self.linear_2(out)
@@ -82,7 +83,6 @@ def visualize_model_as_graph(model:MyNet):
     print(type(dot))
     print(dot)
     dot.render("model_graph", format='png')
-
 
 def load_train_set(origin_train_data, split_ratio, batch_size,force_balanced_categories=True, augmentation=False,
                    augmentation_params=None):
@@ -444,9 +444,6 @@ def visualize_augmentation_example(train_data):
     plt.show()
 
 
-
-
-
 if __name__ == '__main__':
     print("loading data set")
     train_data, test_data = load_mnist()
@@ -454,7 +451,7 @@ if __name__ == '__main__':
 
     dropout = False
     # uncomment to apply dropout
-    # dropout = True
+    dropout = True
 
 
     model = MyNet(CLASSES_COUNT,dropout).to(DEVICE)
