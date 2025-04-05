@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 from torchvision import datasets
 from torchvision.transforms import ToTensor
-from torch.utils.data import DataLoader, random_split, Subset
+from torch.utils.data import DataLoader, random_split, Subset, Dataset
 from torchviz import make_dot
 from torchsummary import summary
 import matplotlib.pyplot as plt
@@ -14,6 +14,7 @@ from scipy.ndimage import gaussian_filter1d
 from sklearn.model_selection import StratifiedShuffleSplit
 from collections import Counter
 import random
+import torchvision
 from torchvision import transforms
 from torchmetrics.classification import MulticlassF1Score
 
@@ -96,6 +97,8 @@ def load_train_set(origin_train_data, split_ratio, batch_size,force_balanced_cat
     else:
         train_set, validation_set = random_split(origin_train_data, [train_size, validation_size])
     train_transform = None
+
+    # TODO: DEPRECATED - Did not work on Nadav's machine. rewritten as different function using https://discuss.pytorch.org/t/transforms-on-subset/166836
     if augmentation:
         rotation_limit = augmentation_params["rotation limit"]
         probability = augmentation_params["probability"]
@@ -115,6 +118,68 @@ def load_train_set(origin_train_data, split_ratio, batch_size,force_balanced_cat
     validation_set.dataset.transform = validation_transform
     train_loader = DataLoader(dataset=train_set, batch_size=batch_size, shuffle=True)
     validation_loader = DataLoader(dataset=validation_set, batch_size=batch_size, shuffle=False)
+
+    if DEBUG:
+        # Verify categories are balanced:
+        sets_dict = {"Train": train_set, "Validation": validation_set}
+        visualize_data_splits(sets_dict)
+    return train_loader, validation_loader
+
+def load_aug_train_set(origin_train_data, split_ratio, batch_size,augmentation_params=None):
+    class MyDataset(Dataset):
+        def __init__(self, subset, transform=None):
+            self.subset = subset
+            self.transform = transform
+
+        def __getitem__(self, index):
+            x, y = self.subset[index]
+            if self.transform:
+                x = self.transform(x)
+            return x, y
+
+        def __len__(self):
+            return len(self.subset)
+
+    train_size = int(len(origin_train_data) * split_ratio)
+    validation_size = len(origin_train_data) - train_size
+    train_set, validation_set = random_split(origin_train_data, [train_size, validation_size])
+
+
+    rotation_limit = augmentation_params["rotation limit"]
+    probability = augmentation_params["probability"]
+    noise_amp = augmentation_params["noise amplitude"]
+    scale_lim = augmentation_params["scale_limit"]
+    train_transform = transforms.Compose([
+        # PIL-based augmentations:
+        transforms.RandomApply([transforms.RandomRotation(degrees=(-rotation_limit, rotation_limit))], p=probability),
+        transforms.RandomHorizontalFlip(p=probability),
+        transforms.RandomApply([transforms.RandomResizedCrop(size=(MNIST_IMAGE_DIM, MNIST_IMAGE_DIM), scale=(scale_lim, 1.0))],p=probability),
+        # Convert PIL image to tensor:
+        transforms.ToTensor(),
+        # Tensor-based augmentation:
+        transforms.RandomApply([
+            transforms.Lambda(lambda img: torch.clamp(img + torch.randn_like(img) * noise_amp, 0, 1))
+        ], p=probability)
+    ])
+
+    aug_train_set = MyDataset(train_set, transform=train_transform)
+    aug_validation_set = MyDataset(validation_set, transform=transforms.Compose([ToTensor()]))
+
+    train_loader = DataLoader(dataset=aug_train_set, batch_size=batch_size, shuffle=True)
+    validation_loader = DataLoader(dataset=aug_validation_set, batch_size=batch_size, shuffle=False)
+
+    batch = next(iter(train_loader))
+    images = batch[0]  # Assumes the batch is a tuple (images, labels)
+
+    # Create a grid of images (adjust nrow as needed)
+    grid_img = torchvision.utils.make_grid(images, nrow=5)
+
+    # Plot the grid
+    plt.figure(figsize=(10, 10))
+    plt.imshow(grid_img.permute(1, 2, 0))
+    plt.axis('off')
+    plt.title("Training Batch Images")
+    plt.show()
 
     if DEBUG:
         # Verify categories are balanced:
@@ -231,8 +296,11 @@ def train(model:MyNet, train_data,
           split_ratio, batch_size, classes_count, learning_rate,
           augmentation=False, augmentation_params=None,patience=False,l2=0):
     print("loading the set into train and validation")
-    train_loader, validation_loader = load_train_set(train_data, split_ratio, batch_size,
-                                                     augmentation=augmentation, augmentation_params=augmentation_params)
+    if augmentation:
+        train_loader, validation_loader = load_aug_train_set(train_data, split_ratio, batch_size,
+                                                         augmentation_params=augmentation_params)
+    else:
+        train_loader, validation_loader = load_train_set(train_data, split_ratio, batch_size)
     loss_function = nn.CrossEntropyLoss()
     if l2>0:
         optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate,weight_decay=l2)
@@ -407,7 +475,7 @@ if __name__ == '__main__':
     # uncomment next 2 lines for augmentation run, comment them for using only original images
 
     augmentation = True
-    augmentation_params = {"rotation limit": 20, "probability": 1, "noise amplitude": 0.2, "scale_limit": 0.5}
+    augmentation_params = {"rotation limit": 20, "probability": 0.9, "noise amplitude": 0.2, "scale_limit": 0.5}
 
     #uncomment next line for early stopping training:
     # patience = 2
