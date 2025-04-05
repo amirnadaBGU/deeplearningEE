@@ -20,8 +20,8 @@ from torchmetrics.classification import MulticlassF1Score
 BATCH_SIZE = 256
 CLASSES_COUNT = 10
 LEARNING_RATE = 0.001
-EPOCHS_COUNT = 10 # changed to 25 to oveserve overfit in section 2 (I think that accroding to forum conditions need to be the same)
-TRAIN_SPLIT_RATIO = 0.8 # 0.8 - regular split. ~0.0005 for receiving an overfit
+EPOCHS_COUNT = 20 # changed to 25 to oveserve overfit in section 2 (I think that accroding to forum conditions need to be the same)
+TRAIN_SPLIT_RATIO = 0.002 # 0.8 - regular split. ~0.002 for receiving an overfit
 MNIST_IMAGE_DIM = 28
 
 DEBUG = True
@@ -29,7 +29,7 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Device used for learning: {DEVICE}")
 
 class MyNet(nn.Module):
-    def __init__(self, classes_count):
+    def __init__(self, classes_count,dropout):
         super(MyNet, self).__init__()
         self.conv_1 = nn.Conv2d(in_channels=1, out_channels=16, kernel_size=3, padding=1)  # in: 28X28, out: 28X28X16
         self.conv_2 = nn.Conv2d(in_channels=16, out_channels=32, kernel_size=3,
@@ -41,15 +41,36 @@ class MyNet(nn.Module):
         self.relu_1 = nn.ReLU()
         self.linear_2 = nn.Linear(300, classes_count)
         self.sm_1 = nn.Softmax(dim=1)
+        self.dropout_fc = nn.Dropout(p=0.05)
 
     def forward(self, x):
         out = self.relu_1(self.conv_1(x))
+
+        if dropout:
+            out = self.dropout_fc(out)
+
         out = self.relu_1(self.conv_2(out))
+
+        if dropout:
+            out = self.dropout_fc(out)
+
         out = self.mp_1(out)
+
+        if dropout:
+            out = self.dropout_fc(out)
+
         out = self.relu_1(self.conv_3(out))
         out = self.mp_1(out)
+        if dropout:
+            out = self.dropout_fc(out)
+
+
         out = out.reshape(out.size(0), -1)
         out = self.relu_1(self.linear_1(out))
+
+        if dropout:
+            out = self.dropout_fc(out)
+
         out = self.linear_2(out)
         return out
 
@@ -166,6 +187,7 @@ def plot_train_progress(train_losses, validation_losses, secondary_axes=True):
         ax2.set_xticklabels(epoch_numbers)
         ax2.set_xlabel("Epoch")
 
+
     # Adjust layout so nothing is clipped
     plt.tight_layout()
     filename = f"image_progress_{datetime.datetime.now()}.png".replace('-', '_').replace(':', '_').replace(' ', "_")
@@ -205,15 +227,27 @@ def plot_f1_scores(all_predicted, all_labels):
 def load_test_set(test_data, batch_size):
     return DataLoader(dataset=test_data, batch_size=batch_size, shuffle=False)
 
-def train(model:MyNet, train_data, split_ratio, batch_size, classes_count, learning_rate, augmentation=False, augmentation_params=None):
+def train(model:MyNet, train_data,
+          split_ratio, batch_size, classes_count, learning_rate,
+          augmentation=False, augmentation_params=None,patience=False,l2=0):
     print("loading the set into train and validation")
     train_loader, validation_loader = load_train_set(train_data, split_ratio, batch_size,
                                                      augmentation=augmentation, augmentation_params=augmentation_params)
     loss_function = nn.CrossEntropyLoss()
-    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+    if l2>0:
+        optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate,weight_decay=l2)
+    else:
+        optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
     steps_count = len(train_loader)
     train_losses = []
     validation_losses = []
+
+    # early stopping params:
+    if patience>0:
+        best_val_loss = float('inf')
+        patience_counter = 0
+        best_model_path = "best_model.pth"
+
     for epoch in range(EPOCHS_COUNT):
         #train the epoch
         print(f"starting epoch {epoch+1}")
@@ -250,8 +284,25 @@ def train(model:MyNet, train_data, split_ratio, batch_size, classes_count, learn
                 acc_loss += loss.item() * batch_size
                 acc_items += batch_size
                 del images, labels, outputs
-            validation_losses[-1] = (acc_loss / acc_items)
+            val_loss = (acc_loss / acc_items)
+            validation_losses[-1] = val_loss
             print(f"validation accuracy ratio: {correct_count / total_images}")
+
+            # early stopping
+            if patience>0:
+                if val_loss < best_val_loss:
+                    best_val_loss = val_loss
+                    patience_counter = 0
+                    torch.save(model.state_dict(), best_model_path)  # Save best model
+                    print(f"Validation loss improved to {val_loss:.4f}. Model checkpoint saved.")
+                else:
+                    patience_counter += 1
+                    print(f"No improvement observed. Patience counter: {patience_counter}/{patience}")
+                    if patience_counter >= patience:
+                        print("Early stopping triggered. Loading best model and stopping training")
+                        print(f"model stooped at epoch {epoch}")
+                        model.load_state_dict(torch.load(best_model_path))
+                        break
 
             # TODO: I comment this out because it sometimes stops the training
             # Todo: (I think the break command stops training and assumed this is not your original intention)
@@ -300,7 +351,6 @@ def visualize_data_splits(sets_dict):
         plot_categories_histograms(dataset, key)
     return
 
-
 def visualize_augmentation_example(train_data):
     original_image,_ = train_data[138]
     augmentations = {
@@ -333,7 +383,13 @@ if __name__ == '__main__':
     print("loading data set")
     train_data, test_data = load_mnist()
     print("creating the model")
-    model = MyNet(CLASSES_COUNT).to(DEVICE)
+
+    dropout = False
+    # uncomment to apply dropout
+    # dropout = True
+
+
+    model = MyNet(CLASSES_COUNT,dropout).to(DEVICE)
     summary(model, (1, 28, 28))
     #visualize_model_as_graph(model)
     #inspect_minist_data(train_data, test_data)
@@ -344,14 +400,26 @@ if __name__ == '__main__':
         visualize_augmentation_example(train_data)
     augmentation = False
     augmentation_params = None
+    patience = 0
+    l2=False
     print("training...")
 
     # uncomment next 2 lines for augmentation run, comment them for using only original images
-    augmentation = True
-    augmentation_params = {"rotation limit": 20, "probability": 0.3, "noise amplitude": 0.3, "scale_limit": 0.5}
+
+    # augmentation = True
+    # augmentation_params = {"rotation limit": 20, "probability": 0.3, "noise amplitude": 0.3, "scale_limit": 0.5}
+
+    #uncomment next line for early stopping training:
+    # patience = 2
+
+    # uncomment to apply L2 regularization
+    l2 = 1e-3
 
     train(model, train_data, TRAIN_SPLIT_RATIO, BATCH_SIZE, CLASSES_COUNT, LEARNING_RATE,
-          augmentation=augmentation, augmentation_params=augmentation_params)
+          augmentation=augmentation, augmentation_params=augmentation_params,patience=patience,
+          l2=l2)
+
+
     print("testing...")
     test(model,test_data, BATCH_SIZE)
     print("done")
