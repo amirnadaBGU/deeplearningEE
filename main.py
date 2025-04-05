@@ -21,7 +21,7 @@ BATCH_SIZE = 256
 CLASSES_COUNT = 10
 LEARNING_RATE = 0.001
 EPOCHS_COUNT = 20 # changed to 25 to oveserve overfit in section 2 (I think that accroding to forum conditions need to be the same)
-TRAIN_SPLIT_RATIO = 0.002 # 0.8 - regular split. ~0.002 for receiving an overfit
+TRAIN_SPLIT_RATIO = 0.8 # 0.8 - regular split. ~0.002 for receiving an overfit
 MNIST_IMAGE_DIM = 28
 
 DEBUG = True
@@ -102,7 +102,7 @@ def load_train_set(origin_train_data, split_ratio, batch_size,force_balanced_cat
         noise_amp = augmentation_params["noise amplitude"]
         scale_lim = augmentation_params["scale_limit"]
         train_transform = transforms.Compose([
-            transforms.RandomApply([transforms.RandomRotation(degrees=(rotation_limit, rotation_limit))], p = probability),
+            transforms.RandomApply([transforms.RandomRotation(degrees=(-rotation_limit, rotation_limit))], p = probability),
             transforms.RandomHorizontalFlip(p = probability),
             transforms.ToTensor(),
             transforms.RandomApply([transforms.Lambda(lambda img: torch.clamp(img + torch.randn_like(img) * noise_amp, 0, 1))], p=probability),
@@ -355,14 +355,14 @@ def visualize_augmentation_example(train_data):
     original_image,_ = train_data[138]
     augmentations = {
         "Original": transforms.ToTensor(),
-        "Rotated 30 degrees": transforms.RandomRotation((30,30)),
+        "Rotated 30 Degrees": transforms.RandomRotation((30,30)),
         "Horizontal Flip": transforms.RandomHorizontalFlip(p=1),
         "Added Gaussian Noise":
             transforms.Compose([
                 transforms.ToTensor(),
                 transforms.Lambda(lambda img: torch.clamp(img + torch.randn_like(img) * 0.2, 0, 1))
                 ]),
-        "Cropped and rescaled by 0.6": transforms.RandomResizedCrop(size=(MNIST_IMAGE_DIM, MNIST_IMAGE_DIM), scale=(0.6, 0.6))
+        "Random Crop 60% and \n Resize to Original Size": transforms.RandomResizedCrop(size=(MNIST_IMAGE_DIM, MNIST_IMAGE_DIM), scale=(0.6, 0.6))
     }
     transformed_images = [augmentations[key](original_image) for key in augmentations]
     transformed_images = [img.squeeze() if isinstance(img, torch.Tensor) else np.array(img) for img in transformed_images]
@@ -401,19 +401,19 @@ if __name__ == '__main__':
     augmentation = False
     augmentation_params = None
     patience = 0
-    l2=False
+    l2 = 0
     print("training...")
 
     # uncomment next 2 lines for augmentation run, comment them for using only original images
 
-    # augmentation = True
-    # augmentation_params = {"rotation limit": 20, "probability": 0.3, "noise amplitude": 0.3, "scale_limit": 0.5}
+    augmentation = True
+    augmentation_params = {"rotation limit": 20, "probability": 1, "noise amplitude": 0.2, "scale_limit": 0.5}
 
     #uncomment next line for early stopping training:
     # patience = 2
 
     # uncomment to apply L2 regularization
-    l2 = 1e-3
+    # l2 = 1e-3
 
     train(model, train_data, TRAIN_SPLIT_RATIO, BATCH_SIZE, CLASSES_COUNT, LEARNING_RATE,
           augmentation=augmentation, augmentation_params=augmentation_params,patience=patience,
