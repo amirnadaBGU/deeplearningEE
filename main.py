@@ -32,6 +32,57 @@ DEBUG = True
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Device used for learning: {DEVICE}")
 
+class NMNISTDataset(Dataset):
+    def __init__(self,
+                 root,
+                 train: bool = True,
+                 transform: Optional[Callable] = None,
+                 target_transform: Optional[Callable] = None):
+        super().__init__()
+        self.train = train
+        data = loadmat(root)
+        if train:
+            self.data = data['train_x']
+            self.targets = np.argmax(data['train_y'], axis=1)
+        else:
+            self.data = data['test_x']
+            self.targets = np.argmax(data['test_y'], axis=1)
+        self.transform = transform
+
+    def __len__(self):
+        return len(self.targets)
+    def __getitem__(self, index):
+        image, target = self.data[index], int(self.targets[index])
+
+        # doing this so that it is consistent with all other datasets
+        # to return a PIL Image
+        image = Image.fromarray(image.reshape(28, 28), mode="L")
+
+        if self.transform is not None:
+            image = self.transform(image)
+
+        return image, target
+
+        # @property
+        # def train_labels(self):
+        #     warnings.warn("train_labels has been renamed targets")
+        #     return self.targets
+        #
+        # @property
+        # def test_labels(self):
+        #     warnings.warn("test_labels has been renamed targets")
+        #     return self.targets
+        #
+        # @property
+        # def train_data(self):
+        #     warnings.warn("train_data has been renamed data")
+        #     return self.data
+        #
+        # @property
+        # def test_data(self):
+        #     warnings.warn("test_data has been renamed data")
+        #     return self.data
+
 class MyNet(nn.Module):
     def __init__(self, classes_count,dropout=False):
         super(MyNet, self).__init__()
@@ -128,7 +179,9 @@ def load_train_set(origin_train_data, split_ratio, batch_size,force_balanced_cat
         visualize_data_splits(sets_dict)
     return train_loader, validation_loader
 
-def load_aug_train_set(origin_train_data, split_ratio, batch_size,augmentation_params=None):
+def load_aug_train_set(origin_train_data, split_ratio, batch_size,
+                       force_balanced_categories=True,augmentation_params=None,
+                       augmentation_booleans=None):
     class MyDataset(Dataset):
         def __init__(self, subset, transform=None):
             self.subset = subset
@@ -145,24 +198,37 @@ def load_aug_train_set(origin_train_data, split_ratio, batch_size,augmentation_p
 
     train_size = int(len(origin_train_data) * split_ratio)
     validation_size = len(origin_train_data) - train_size
-    train_set, validation_set = random_split(origin_train_data, [train_size, validation_size])
+
+    if force_balanced_categories:
+        targets = origin_train_data.targets
+        splitter = StratifiedShuffleSplit(n_splits=1, test_size=validation_size / (train_size + validation_size))
+        for train_idx, val_idx in splitter.split(X=range(len(targets)), y=targets):
+            train_set = Subset(origin_train_data, train_idx)
+            validation_set = Subset(origin_train_data, val_idx)
+    else:
+        train_set, validation_set = random_split(origin_train_data, [train_size, validation_size])
 
 
     rotation_limit = augmentation_params["rotation limit"]
-    probability = augmentation_params["probability"]
     noise_amp = augmentation_params["noise amplitude"]
     scale_lim = augmentation_params["scale_limit"]
+
+    rot_p=augmentation_booleans[0]
+    flip_p = augmentation_booleans[1]
+    crop_p = augmentation_booleans[2]
+    noise_p=augmentation_booleans[3]
+
     train_transform = transforms.Compose([
         # PIL-based augmentations:
-        transforms.RandomApply([transforms.RandomRotation(degrees=(-rotation_limit, rotation_limit))], p=probability),
-        transforms.RandomHorizontalFlip(p=probability),
-        transforms.RandomApply([transforms.RandomResizedCrop(size=(MNIST_IMAGE_DIM, MNIST_IMAGE_DIM), scale=(scale_lim, 1.0))],p=probability),
+        transforms.RandomApply([transforms.RandomRotation(degrees=(-rotation_limit, rotation_limit))], p=rot_p),
+        transforms.RandomHorizontalFlip(p=flip_p),
+        transforms.RandomApply([transforms.RandomResizedCrop(size=(MNIST_IMAGE_DIM, MNIST_IMAGE_DIM), scale=(scale_lim, 1.0))],p=crop_p),
         # Convert PIL image to tensor:
         transforms.ToTensor(),
         # Tensor-based augmentation:
         transforms.RandomApply([
             transforms.Lambda(lambda img: torch.clamp(img + torch.randn_like(img) * noise_amp, 0, 1))
-        ], p=probability)
+        ], p=noise_p)
     ])
 
     aug_train_set = MyDataset(train_set, transform=train_transform)
@@ -297,11 +363,13 @@ def load_test_set(test_data, batch_size):
 
 def train(model:MyNet, train_data,
           split_ratio, batch_size, classes_count, learning_rate,
-          augmentation=False, augmentation_params=None,patience=0,l2=0):
+          augmentation=False, augmentation_params=None,augmentation_booleans=None,patience=False,l2=0):
     print("loading the set into train and validation")
     if augmentation:
         train_loader, validation_loader = load_aug_train_set(train_data, split_ratio, batch_size,
-                                                         augmentation_params=augmentation_params)
+                                                             force_balanced_categories=True,
+                                                                augmentation_params=augmentation_params,
+                                                                    augmentation_booleans=augmentation_booleans)
     else:
         train_loader, validation_loader = load_train_set(train_data, split_ratio, batch_size)
     loss_function = nn.CrossEntropyLoss()
@@ -408,61 +476,10 @@ def load_mnist():
     test_data = datasets.MNIST(root='./mnist/', download=True, train=False, transform=ToTensor())
     return train_data, test_data
 
-class NMNISTDataset(Dataset):
-    def __init__(self,
-                 root,
-                 train: bool = True,
-                 transform: Optional[Callable] = None,
-                 target_transform: Optional[Callable] = None):
-        super().__init__()
-        self.train = train
-        data = loadmat(root)
-        if train:
-            self.data = data['train_x']
-            self.targets = np.argmax(data['train_y'], axis=1)
-        else:
-            self.data = data['test_x']
-            self.targets = np.argmax(data['test_y'], axis=1)
-        self.transform = transform
-
-    def __len__(self):
-        return len(self.targets)
-    def __getitem__(self, index):
-        image, target = self.data[index], int(self.targets[index])
-
-        # doing this so that it is consistent with all other datasets
-        # to return a PIL Image
-        image = Image.fromarray(image.reshape(28, 28), mode="L")
-
-        if self.transform is not None:
-            image = self.transform(image)
-
-        return image, target
-
-        @property
-        def train_labels(self):
-            warnings.warn("train_labels has been renamed targets")
-            return self.targets
-
-        @property
-        def test_labels(self):
-            warnings.warn("test_labels has been renamed targets")
-            return self.targets
-
-        @property
-        def train_data(self):
-            warnings.warn("train_data has been renamed data")
-            return self.data
-
-        @property
-        def test_data(self):
-            warnings.warn("test_data has been renamed data")
-            return self.data
 def load_n_mnist():
     train_data = NMNISTDataset(root="./n_mnist/mnist-with-awgn/mnist-with-awgn.mat", train=True)
     test_data = NMNISTDataset(root="./n_mnist/mnist-with-awgn/mnist-with-awgn.mat", train=False, transform=ToTensor())
     return train_data, test_data
-
 
 def inspect_minist_data(train_data, test_data):
     print(type(train_data))
