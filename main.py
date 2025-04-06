@@ -17,11 +17,14 @@ import random
 import torchvision
 from torchvision import transforms
 from torchmetrics.classification import MulticlassF1Score
+from scipy.io import loadmat
+from PIL import Image
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 BATCH_SIZE = 256
 CLASSES_COUNT = 10
 LEARNING_RATE = 0.001
-EPOCHS_COUNT = 20 # changed to 25 to oveserve overfit in section 2 (I think that accroding to forum conditions need to be the same)
+EPOCHS_COUNT = 5 # changed to 25 to oveserve overfit in section 2 (I think that accroding to forum conditions need to be the same)
 TRAIN_SPLIT_RATIO = 0.8 # 0.8 - regular split. ~0.002 for receiving an overfit
 MNIST_IMAGE_DIM = 28
 
@@ -294,7 +297,7 @@ def load_test_set(test_data, batch_size):
 
 def train(model:MyNet, train_data,
           split_ratio, batch_size, classes_count, learning_rate,
-          augmentation=False, augmentation_params=None,patience=False,l2=0):
+          augmentation=False, augmentation_params=None,patience=0,l2=0):
     print("loading the set into train and validation")
     if augmentation:
         train_loader, validation_loader = load_aug_train_set(train_data, split_ratio, batch_size,
@@ -405,6 +408,62 @@ def load_mnist():
     test_data = datasets.MNIST(root='./mnist/', download=True, train=False, transform=ToTensor())
     return train_data, test_data
 
+class NMNISTDataset(Dataset):
+    def __init__(self,
+                 root,
+                 train: bool = True,
+                 transform: Optional[Callable] = None,
+                 target_transform: Optional[Callable] = None):
+        super().__init__()
+        self.train = train
+        data = loadmat(root)
+        if train:
+            self.data = data['train_x']
+            self.targets = np.argmax(data['train_y'], axis=1)
+        else:
+            self.data = data['test_x']
+            self.targets = np.argmax(data['test_y'], axis=1)
+        self.transform = transform
+
+    def __len__(self):
+        return len(self.targets)
+    def __getitem__(self, index):
+        image, target = self.data[index], int(self.targets[index])
+
+        # doing this so that it is consistent with all other datasets
+        # to return a PIL Image
+        image = Image.fromarray(image.reshape(28, 28), mode="L")
+
+        if self.transform is not None:
+            image = self.transform(image)
+
+        return image, target
+
+        @property
+        def train_labels(self):
+            warnings.warn("train_labels has been renamed targets")
+            return self.targets
+
+        @property
+        def test_labels(self):
+            warnings.warn("test_labels has been renamed targets")
+            return self.targets
+
+        @property
+        def train_data(self):
+            warnings.warn("train_data has been renamed data")
+            return self.data
+
+        @property
+        def test_data(self):
+            warnings.warn("test_data has been renamed data")
+            return self.data
+def load_n_mnist():
+    train_data = NMNISTDataset(root="./n_mnist/mnist-with-awgn/mnist-with-awgn.mat", train=True)
+    test_data = NMNISTDataset(root="./n_mnist/mnist-with-awgn/mnist-with-awgn.mat", train=False, transform=ToTensor())
+    return train_data, test_data
+
+
 def inspect_minist_data(train_data, test_data):
     print(type(train_data))
     print(type(test_data))
@@ -446,12 +505,13 @@ def visualize_augmentation_example(train_data):
 
 if __name__ == '__main__':
     print("loading data set")
-    train_data, test_data = load_mnist()
+    train_data, test_data = load_n_mnist()
+    #train_data, test_data = load_mnist()
     print("creating the model")
 
     dropout = False
     # uncomment to apply dropout
-    dropout = True
+    #dropout = True
 
 
     model = MyNet(CLASSES_COUNT,dropout).to(DEVICE)
@@ -462,7 +522,6 @@ if __name__ == '__main__':
     # Only for debug Purposes for seif 2
     if DEBUG:
         visualize_data_splits({"Test":test_data})
-        visualize_augmentation_example(train_data)
     augmentation = False
     augmentation_params = None
     patience = 0
@@ -471,8 +530,9 @@ if __name__ == '__main__':
 
     # uncomment next 2 lines for augmentation run, comment them for using only original images
 
-    augmentation = True
-    augmentation_params = {"rotation limit": 20, "probability": 0.9, "noise amplitude": 0.2, "scale_limit": 0.5}
+    #augmentation = True
+    #augmentation_params = {"rotation limit": 20, "probability": 0.9, "noise amplitude": 0.2, "scale_limit": 0.5}
+    visualize_augmentation_example(train_data)
 
     #uncomment next line for early stopping training:
     # patience = 2
