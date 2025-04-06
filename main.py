@@ -29,6 +29,10 @@ DEBUG = True
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Device used for learning: {DEVICE}")
 
+DEBUG = True
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(f"Device used for learning: {DEVICE}")
+
 class MyNet(nn.Module):
     def __init__(self, classes_count,dropout=False):
         super(MyNet, self).__init__()
@@ -125,7 +129,9 @@ def load_train_set(origin_train_data, split_ratio, batch_size,force_balanced_cat
         visualize_data_splits(sets_dict)
     return train_loader, validation_loader
 
-def load_aug_train_set(origin_train_data, split_ratio, batch_size,augmentation_params=None):
+def load_aug_train_set(origin_train_data, split_ratio, batch_size,
+                       force_balanced_categories=True,augmentation_params=None,
+                       augmentation_booleans=None):
     class MyDataset(Dataset):
         def __init__(self, subset, transform=None):
             self.subset = subset
@@ -142,24 +148,37 @@ def load_aug_train_set(origin_train_data, split_ratio, batch_size,augmentation_p
 
     train_size = int(len(origin_train_data) * split_ratio)
     validation_size = len(origin_train_data) - train_size
-    train_set, validation_set = random_split(origin_train_data, [train_size, validation_size])
+
+    if force_balanced_categories:
+        targets = origin_train_data.targets
+        splitter = StratifiedShuffleSplit(n_splits=1, test_size=validation_size / (train_size + validation_size))
+        for train_idx, val_idx in splitter.split(X=range(len(targets)), y=targets):
+            train_set = Subset(origin_train_data, train_idx)
+            validation_set = Subset(origin_train_data, val_idx)
+    else:
+        train_set, validation_set = random_split(origin_train_data, [train_size, validation_size])
 
 
     rotation_limit = augmentation_params["rotation limit"]
-    probability = augmentation_params["probability"]
     noise_amp = augmentation_params["noise amplitude"]
     scale_lim = augmentation_params["scale_limit"]
+
+    rot_p=augmentation_booleans[0]
+    flip_p = augmentation_booleans[1]
+    crop_p = augmentation_booleans[2]
+    noise_p=augmentation_booleans[3]
+
     train_transform = transforms.Compose([
         # PIL-based augmentations:
-        transforms.RandomApply([transforms.RandomRotation(degrees=(-rotation_limit, rotation_limit))], p=probability),
-        transforms.RandomHorizontalFlip(p=probability),
-        transforms.RandomApply([transforms.RandomResizedCrop(size=(MNIST_IMAGE_DIM, MNIST_IMAGE_DIM), scale=(scale_lim, 1.0))],p=probability),
+        transforms.RandomApply([transforms.RandomRotation(degrees=(-rotation_limit, rotation_limit))], p=rot_p),
+        transforms.RandomHorizontalFlip(p=flip_p),
+        transforms.RandomApply([transforms.RandomResizedCrop(size=(MNIST_IMAGE_DIM, MNIST_IMAGE_DIM), scale=(scale_lim, 1.0))],p=crop_p),
         # Convert PIL image to tensor:
         transforms.ToTensor(),
         # Tensor-based augmentation:
         transforms.RandomApply([
             transforms.Lambda(lambda img: torch.clamp(img + torch.randn_like(img) * noise_amp, 0, 1))
-        ], p=probability)
+        ], p=noise_p)
     ])
 
     aug_train_set = MyDataset(train_set, transform=train_transform)
@@ -294,11 +313,13 @@ def load_test_set(test_data, batch_size):
 
 def train(model:MyNet, train_data,
           split_ratio, batch_size, classes_count, learning_rate,
-          augmentation=False, augmentation_params=None,patience=False,l2=0):
+          augmentation=False, augmentation_params=None,augmentation_booleans=None,patience=False,l2=0):
     print("loading the set into train and validation")
     if augmentation:
         train_loader, validation_loader = load_aug_train_set(train_data, split_ratio, batch_size,
-                                                         augmentation_params=augmentation_params)
+                                                             force_balanced_categories=True,
+                                                                augmentation_params=augmentation_params,
+                                                                    augmentation_booleans=augmentation_booleans)
     else:
         train_loader, validation_loader = load_train_set(train_data, split_ratio, batch_size)
     loss_function = nn.CrossEntropyLoss()
@@ -472,8 +493,8 @@ if __name__ == '__main__':
     # uncomment next 2 lines for augmentation run, comment them for using only original images
 
     augmentation = True
-    augmentation_params = {"rotation limit": 20, "probability": 0.9, "noise amplitude": 0.2, "scale_limit": 0.5}
-
+    augmentation_params = {"rotation limit": 20, "noise amplitude": 0.2, "scale_limit": 0.5}
+    augmentation_booleans = [0, 0,0,0] # rotation, horizontal flip, crop, noise]
     #uncomment next line for early stopping training:
     # patience = 2
 
@@ -481,7 +502,7 @@ if __name__ == '__main__':
     # l2 = 1e-3
 
     train(model, train_data, TRAIN_SPLIT_RATIO, BATCH_SIZE, CLASSES_COUNT, LEARNING_RATE,
-          augmentation=augmentation, augmentation_params=augmentation_params,patience=patience,
+          augmentation=augmentation, augmentation_params=augmentation_params,augmentation_booleans=augmentation_booleans,patience=patience,
           l2=l2)
 
 
